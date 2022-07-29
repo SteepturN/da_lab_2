@@ -1,2 +1,7 @@
-aaaaa
-! a
+aaa
++ abc
+- abc
+! abc
+bbb
++ abc
+bbbbbbb
