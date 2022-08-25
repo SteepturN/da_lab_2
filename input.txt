@@ -1,7 +1,84 @@
++ a 1
++ b 2
++ c 3
++ d 4
++ e 5
++ f 6
++ g 7
+a
+b
+c
+d
+e
+f
+g
++ ab 34
 aaa
-+ abc
-- abc
-! abc
-bbb
-+ abc
-bbbbbbb
++ ab 4
++ asf 55
++ asf 55
++ asd 56
+asd
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
++ abc 34
++ abc 4
++ asfsf 55
++ asfsf 55
++ asdfasf 56
+abc
+asdfasf
+asfsf
