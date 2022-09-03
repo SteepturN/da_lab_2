@@ -49,7 +49,8 @@ class BTree {
         void* memory;
         BlockLocation first_free_block;
         BlockLocation first_block;
-        BlockLocation rightmost;
+        BlockLocation rightmost; //почти не работает, если много удалений, но ладно,
+                                 //можно при записи перекинуть все эти блоки
 
         ElementLocation first_string;
         ElementLocation last_string;
@@ -75,16 +76,43 @@ class BTree {
         //                             ElementInBlockLocation new_location );
         void turn_last_free_block( BlockLocation block );
         bool have_parent( BlockLocation block );
-        void turn_no_parent( BlockLocation block );
+        void set_no_parent( BlockLocation block );
         void set_pointer( ElementLocation insert_place, BlockLocation el );
-        bool move_pointer( ElementLocation old_location,
-                           ElementLocation new_location );
+        bool move_link( ElementLocation old_location,
+                        ElementLocation new_location );
         bool move_element_without_links( ElementLocation old_location,
                                          ElementLocation new_location,
                                          bool move_other_elements = true );
         // void print_block( BlockLocation block );
-        void right_shift_elements( ElementLocation shift_until );
+        void shift_right_elements( ElementLocation shift_until );
         bool is_last_free_block( BlockLocation block );
+        void make_enough_to_merge( ElementLocation& el );
+        void merge( ElementLocation& el );
+        void free_block( BlockLocation block );
+        void take_left( BlockLocation el );
+        void take_right( BlockLocation el );
+        bool left_has_enough_to_take( BlockLocation block );
+        bool right_has_enough_to_take( BlockLocation block );
+        bool has_parent( BlockLocation block );
+        bool check_correction( ElementLocation& el );
+        void remove_el( ElementLocation& el );
+        BlockLocation right_child( ElementLocation el );
+        bool is_min_element( ElementLocation el );
+        bool is_max_element( ElementLocation el );
+        ElementLocation right_parent( BlockLocation el );
+        ElementLocation left_parent( BlockLocation el );
+        // ElementLocation max_left_sibling( BlockLocation el );
+        // ElementLocation max_right_sibling( BlockLocation el );
+        void take_and_move( ElementLocation take, ElementLocation replace );
+        void delete_links( ElementInBlockLocation el );
+        BlockLocation right_sibling( BlockLocation el );
+        BlockLocation left_sibling( BlockLocation el );
+        bool has_right_sibling( ElementLocation el );
+        ElementLocation min_in_right_sibling( BlockLocation el );
+        ElementLocation max_in_left_sibling( BlockLocation el );
+        ElementLocation max_left_link( BlockLocation el );
+        ElementLocation min_right_link( BlockLocation el );
+        void shift_left_elements( ElementLocation shift_until );
 };
 
 // void BTree::print_block( BlockLocation block ) {
@@ -127,6 +155,10 @@ struct BTree::BlockElement {
     void set_elements_count( ElementsCount count );
     void set_links( ElementInBlockLocation el, BlockLocation left_block,
                     BlockLocation right_block );
+    void set_link( ElementInBlockLocation el,
+                   BlockLocation left_block );
+    bool has_enough_to_merge();
+    bool has_enough_to_delete();
 };
 //static const max_element_count = ( 2 * minimum_degree - 2 ) * max_blocks_count;
 
@@ -291,7 +323,7 @@ ReturnMessage BTree::add( StringIntLocation new_el ) {
     if( was_empty = empty() ) {
         first_block = get_free_block();
         get_block_ptr( first_block )->turn_leaf();
-        turn_no_parent( first_block );
+        set_no_parent( first_block );
     }
     ElementLocation insert_place;
     StringIntLocation data_hint;
@@ -311,14 +343,132 @@ ReturnMessage BTree::add( StringIntLocation new_el ) {
 }
 
 ReturnMessage BTree::remove( StringIntLocation el ) {
-    ElementLocation delete_el;
     StringIntLocation data_hint;
-    if( find_el( el, delete_el, data_hint ) ) {
-        remove( delete_el );
-    } else {
-        return ReturnMessage::NoSuchWord;
+    ElementLocation cur_element = ElementLocation( first_block, 0 );
+    while( true ) {
+        if( !find_in_block( el, cur_element.block, cur_element.element, data_hint ) ) {
+            if( get_block_ptr( cur_element.block )->leaf() ) {
+                return ReturnMessage::NoSuchWord;
+            }
+            cur_element.block = go_deeper( cur_element );
+            make_enough_to_merge( cur_element ); // took by reference
+        } else {
+            remove_el( cur_element );
+            return ReturnMessage::Ok;
+        }
     }
-    return ReturnMessage::Ok;
+    return ReturnMessage::NoSuchWord;
+}
+// I know, that parent can go here to merge
+// I should just try to take from left or right sibling
+// or just merge - easy
+void BTree::make_enough_to_merge( ElementLocation& el ) {
+    BlockElement* merge_block_ptr = get_block_ptr( el.block );
+    if( /* !has_parent( el.block ) || */ // I just won't use this function to measure first block
+        merge_block_ptr->has_enough_to_delete() ) {
+        return;
+    } else if( left_has_enough_to_take( el.block ) ) {
+        take_left( el.block );
+    } else if( right_has_enough_to_take( el.block ) ) {
+        take_right( el.block );
+    } else {
+        merge( el ); //took by reference
+    }
+}
+// I can always take parent element
+bool BTree::has_right_sibling( ElementLocation el ) {
+    ElementLocation parent = get_block_ptr( el )->parent;
+    return get_block_ptr( parent )->used != el.element;
+}
+BlockLocation BTree::right_sibling( BlockLocation el ) {
+    ElementLocation parent = get_block_ptr( el )->parent;
+    return get_block_ptr( parent.block )->block_pointers[ parent.element + 1 ];
+}
+BlockLocation BTree::left_sibling( BlockLocation el ) {
+    ElementLocation parent = get_block_ptr( el )->parent;
+    return get_block_ptr( parent.block )->block_pointers[ parent.element - 1 ];
+}
+void BTree::merge( ElementLocation& el ) {
+    BlockElement* el_block = get_block_ptr( el.block );
+    BlockLocation right_block, left_block;
+    if( has_right_sibling( el ) ) {
+        right_block = right_sibling( el.block );
+        left_block = el.block;
+        //merge_right
+    } else { //in other case always has left sibling
+        right_block = el.block;
+        left_block = left_sibling( el.block );
+        el = ElementLocation( left_block, el.element + minimum_degree );
+    }
+    for( ElementInBlockLocation el_location = 0; el_location < minimum_degree - 1; ++el_location ) {
+        move_element( ElementLocation( right_block, el_location ),
+                      ElementLocation( left_block, el_location + minimum_degree ) );
+    }
+    move_link( ElementLocation( right_block, minimum_degree - 1 ),
+               ElementLocation( left_block, 2 * minimum_degree - 1 ) );
+    ElementLocation parent = get_block_ptr( left_block )->parent;
+    free_block( right_block ); //definitly not first_block
+    move_element_without_links( parent,
+                                ElementLocation( left_block, minimum_degree - 1 ) );
+
+    if( !have_parent( parent.block ) && ( get_block_ptr( parent )->used == 1 ) ) {
+        first_block = left_block;
+        free_block( parent.block ); // first-blocks should change
+        set_no_parent( left_block );
+    } else {
+        shift_left_elements( parent ); // shifts also links, decreases used
+        get_block_ptr( parent.block )->set_link( parent.element, left_block );
+    }
+    get_block_ptr( left_block )->set_elements_count( 2 * minimum_degree - 1 );
+}
+void BTree::free_block( BlockLocation block ) {
+    BlockElement* block_ptr = get_block_ptr( block );
+    block_ptr->used = 0;
+    make_free_blocks_chain( block, first_free_block );
+    this->first_free_block = block;
+}
+ElementLocation BTree::max_left_link( BlockLocation el ) {
+    ElementLocation answ = max_in_left_block( el );
+    ++answ.element;
+    return answ;
+}
+ElementLocation BTree::min_right_link( BlockLocation el ) {
+    return min_in_right_block( el );
+}
+void BTree::take_left( BlockLocation el ) {
+    shift_right_elements( ElementLocation( el, 0 ) );
+    move_element_without_links( left_parent( el ), ElementLocation( el, 0 ) );
+    move_element_without_links( max_in_left_sibling( el ), left_parent( el ) );
+    move_link( max_left_link( el ), ElementLocation( el, 0 ) )
+    get_block_ptr( left_sibling( el ) )->used--;
+    // get_block_ptr( el )->used++; // in shift already increased
+}
+void BTree::take_right( BlockLocation el ) {
+    BlockElement* right_block_ptr = get_block_ptr( right_sibling( el ) ),
+        block_ptr = get_block_ptr( el );
+    move_element_without_links( right_parent( el ), ElementLocation( el, block_ptr->used ) );
+    move_element_without_links( min_in_right_sibling( el ), right_parent( el ) );
+    move_link( min_right_link( el ), ElementLocation( el, block_ptr->used + 1 ) );
+
+    shift_left_elements( ElementLocation( right_sibling( el ), 0 ) );
+    // right_block_ptr( el )->used--; // in shift already decreased
+    block_ptr->used++;
+}
+
+bool BTree::left_has_enough_to_take( BlockLocation block ) {
+    ElementLocation parent = get_block_ptr( block )->parent;
+    return ( parent.element != 0 ) &&
+        get_block_ptr(
+            get_block_ptr( parent.block )->block_pointers[ parent.element - 1 ]
+        )->has_enough_to_delete();
+}
+bool BTree::right_has_enough_to_take( BlockLocation block ) {
+    ElementLocation parent = get_block_ptr( block )->parent;
+    BlockElement* parent_ptr = get_block_ptr( parent.block );
+    return ( parent.element != parent_ptr->used ) &&
+        get_block_ptr(
+            parent_ptr->block_pointers[ parent.element + 1 ]
+        )->has_enough_to_delete();
 }
 ReturnMessage BTree::save_to_file( StringIntLocation el ) {
     return ReturnMessage::Ok;
@@ -341,7 +491,7 @@ BlockLocation BTree::get_block_location( BlockElement* block_ptr ) {
 BTree::BlockElement* BTree::get_block_ptr( ElementLocation el ){
     return get_block_ptr( el.block );
 }
-void BTree::left_shift_elements( ElementLocation shift_until ) {
+void BTree::shift_left_elements( ElementLocation shift_until ) {
     BlockElement* block = get_block_ptr( shift_until.block );
     ElementInBlockLocation cur_moving = 0;
     while( shift_until.element + cur_moving < block->used ) { // will work even if insert_place is > used
@@ -352,7 +502,7 @@ void BTree::left_shift_elements( ElementLocation shift_until ) {
     }
     --block->used;
 }
-void BTree::right_shift_elements( ElementLocation shift_until ) {
+void BTree::shift_right_elements( ElementLocation shift_until ) {
     BlockElement* block = get_block_ptr( shift_until.block );
     ElementInBlockLocation cur_moving = block->used;
     while( shift_until.element < cur_moving ) { // will work even if insert_place is > used
@@ -366,7 +516,7 @@ void BTree::right_shift_elements( ElementLocation shift_until ) {
 bool BTree::insert_new( StringIntLocation new_el, ElementLocation insert_place ) {
  //   if(  )//insert_place == used (вставить на несуществующее ещё место)
     BlockElement* block = get_block_ptr( insert_place.block );
-    right_shift_elements( insert_place );
+    shift_right_elements( insert_place );
     block->elements[ insert_place.element ] = Element( new_el, last_string, insert_place );
     last_string = insert_place;
     return true;
@@ -374,7 +524,7 @@ bool BTree::insert_new( StringIntLocation new_el, ElementLocation insert_place )
 bool BTree::have_parent( BlockLocation block ) {
     return !( get_block_ptr( block )->parent.block == block );
 }
-void BTree::turn_no_parent( BlockLocation block ) {
+void BTree::set_no_parent( BlockLocation block ) {
     get_block_ptr( block )->parent.block = block;
 }
 void BTree::BlockElement::turn_node() {
@@ -397,19 +547,19 @@ bool BTree::split( BlockElement* left_block_ptr ) {
         move_element( ElementLocation( left_block, el_location + minimum_degree ),
                       ElementLocation( right_block, el_location ) );
     }
-    move_pointer( ElementLocation( left_block, 2 * minimum_degree - 1 ),
+    move_link( ElementLocation( left_block, 2 * minimum_degree - 1 ),
                   ElementLocation( right_block, minimum_degree - 1 ) );
 
     if( !have_parent( left_block ) ) {
         new_parent = ElementLocation( get_free_block(), 0 /* first element */ );
         BlockElement* parent = get_block_ptr( new_parent );
-        turn_no_parent( new_parent.block );
+        set_no_parent( new_parent.block );
         parent->set_elements_count( 1 );
         parent->turn_node();
         this->first_block = new_parent.block;
     } else {
         new_parent = left_block_ptr->parent; //location
-        right_shift_elements( new_parent );
+        shift_right_elements( new_parent );
     }
 
     move_element_without_links( ElementLocation( left_block, minimum_degree - 1 ),
@@ -431,7 +581,11 @@ void BTree::BlockElement::set_links( ElementInBlockLocation el, BlockLocation le
     block_pointers[ el ] = left_block;
     block_pointers[ el + 1 ] = right_block;
 }
-bool BTree::move_pointer( ElementLocation old_location,
+void BTree::BlockElement::set_link( ElementInBlockLocation el,
+                                    BlockLocation left_block ) {
+    block_pointers[ el ] = left_block;
+}
+bool BTree::move_link( ElementLocation old_location,
                           ElementLocation new_location ) {
     BlockElement* old_block_ptr = get_block_ptr( old_location );
     BlockElement* new_block_ptr = get_block_ptr( new_location );
@@ -476,54 +630,149 @@ bool BTree::move_element_without_links( ElementLocation old_location,
 bool BTree::move_element( ElementLocation old_location,
                           ElementLocation new_location ) {
     move_element_without_links( old_location, new_location );
-    move_pointer( old_location, new_location );
+    move_link( old_location, new_location );
 
     return true;
 }
-bool BTree::remove( ElementLocation el ) {
+
+bool BTree::has_parent( BlockLocation block ) {
+    return get_block_ptr( block )->parent.block == block;
+}
+bool BTree::check_correction( ElementLocation& el ) {
+    BlockElement* block_ptr = get_block_ptr( el.block );
+    if( ( block_ptr->used == el.element + 1 )
+        && ( !right_has_enough_to_merge( el.block ) )
+        && ( !left_has_enough_to_take( el.block ) ) ) {
+        el = ElementLocation( left_child( el ), minimum_degree - 1 );
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void BTree::remove_el( ElementLocation& el ) {
     BlockElement* remove_block_ptr = get_block_ptr( el );
     BlockElement* parent_block_ptr = nullptr,
         left_block_ptr = nullptr, right_block_ptr = nullptr;
     bool el_has_parent = false, left_has_enough = false, right_has_enough = false;
-
     if( remove_block_ptr->leaf() ) {
-        if( ( el_has_parent = has_parent( el.block ) ) ) {
-            parent_block_ptr = get_block_ptr( remove_block_ptr->parent );
-            if( parent_block_ptr->has_left_sibling( el.element )
-                && ( left_block_ptr = get_block_ptr( parent_block_ptr->
-                                                    left_sibling( el.element ) ) )
-                ->has_enough_to_delete() ) {
-                left_has_enough = true;
-            } else if( parent_block_ptr->has_right_sibling( el.element )
-                && ( right_block_ptr = get_block_ptr( parent_block_ptr->
-                                                    right_sibling( el.element ) ) )
-                    ->has_enough_to_delete() ) {
-                right_has_enough = true;
+        if( has_parent( el.block ) && !remove_block_ptr->has_enough_to_delete() ) {
+            if( left_has_enough_to_take( el.block ) ) {
+                take_left( el.block );
+                ++el.element;
+            } else if( right_has_enough_to_take( el.block ) ) {
+                take_right( el.block );
+            } else {
+                merge( el ); //took by reference
             }
         }
-    } else {
 
-    }
-    if( remove_block_ptr->leaf() ) {
-        if( !el_has_parent || remove_block_ptr->has_enough_to_delete() ) {
-            remove_block_ptr->remove_element( el.element );
+        if( !has_parent( el.block ) && ( get_block_ptr( el )->used == 1 ) ) {
+            make_btree_free();
         } else {
-            if( left_has_enough_to_take( el.block ) ) {
-                delete_links( el ); // links
-                move_element_without_links( left_parent( el ), el );
-                move_element_without_links( left_sibling( el ), left_parent( el ) );
-            } else if( right_has_enough_to_take( el.block ) ) {
-                delete_links( el ); // links
-                move_element_without_links( right_parent( el ), el );
-                move_element_without_links( right_sibling( el ), right_parent( el ) );
-            } else {
-                merge( el );
-                remove_block_ptr->remove_element( el.element );
-            }
+            get_block_ptr( el.block )->delete_links( el.element );
+            shift_left_elements( el );
         }
     } else { // node
-        take_and_replace_right_smallest(  );
+        make_enough_to_merge( el );
+        ElementLocation cur_element = ElementLocation( right_child( el ), 0 );
+        while( true ) {
+            if( check_correction( el ) || get_block_ptr( cur_element )->leaf() ) {
+                make_enough_to_merge( cur_element );
+                break;
+            }
+            make_enough_to_merge( cur_element );
+            cur_element = ElementLocation( go_deeper( ElementLocation( cur_element.block, 0 ) ), 0 );
+        }
+        if( !get_block_ptr( cur_element )->leaf() ) {
+            do {
+                cur_element = ElementLocation( go_deeper( ElementLocation( cur_element.block, 0 ) ), 0 );
+                make_enough_to_merge( cur_element ); // took by reference
+            } while( !get_block_ptr( cur_element )->leaf() );
+        }
+
+        get_block_ptr( el.block )->delete_links( el.element );
+        move_without_links( cur_element, el );
+        shift_left_elements( cur_element );
     }
+}
+BlockLocation BTree::right_child( ElementLocation el ) {
+    return get_block_ptr( el.block )->block_pointers[ el.elements + 1 ];
+}
+bool BTree::BlockElement::has_enough_to_merge() {
+    return used > minimum_degree - 1;
+}
+bool BTree::BlockElement::has_enough_to_delete() {
+    return used > minimum_degree - 1;
+}
+bool BTree::is_min_element( ElementLocation el ) {
+    return el.element == 0;
+}
+bool BTree::is_max_element( ElementLocation el ) {
+    return el.element == ( get_block_ptr( el.block )->used - 1 );
+}
+ElementLocation BTree::right_parent( BlockLocation el ) {
+    ElementLocation answ = get_block_ptr( el )->parent;
+#ifndef RELEASE_VERSION
+    if( is_max_element( answ ) ) {
+        exit( 1 );
+    }
+#endif
+    ++answ.element;
+    return answ;
+}
+ElementLocation BTree::left_parent( BlockLocation el ) {
+    ElementLocation answ = get_block_ptr( el )->parent;
+#ifndef RELEASE_VERSION
+    if( is_min_element( answ ) ) {
+        exit( 1 );
+    }
+#endif
+    --answ.element;
+    return answ;
+}
+// ElementLocation BTree::max_in_left_sibling( BlockLocation el ) {
+//     ElementLocation parent = get_block_ptr( el )->parent;
+//     BlockLocation answ;
+//     answ = get_block_ptr( parent.block )->block_pointers[ el.element - 1 ];
+//     return ElementLocation( answ, get_block_ptr( answ )->used - 1 );
+// }
+// ElementLocation BTree::min_in_right_sibling( BlockLocation el ) {
+//     ElementLocation parent = get_block_ptr( el )->parent;
+//     BlockLocation answ;
+//     answ = get_block_ptr( parent.block )->block_pointers[ el.element + 1 ];
+//     return ElementLocation( answ, 0 );
+// }
+ElementLocation BTree::max_in_left_sibling( BlockLocation el ) {
+    ElementLocation answ = get_block_ptr( el )->parent;
+#ifndef RELEASE_VERSION
+    if( is_min_element( answ ) ) {
+        exit( 1 );
+    }
+#endif
+    --answ.element;
+    answ.block = go_deeper( answ );
+    return ElementLocation( answ.block, get_block_ptr( answ.block )->used - 1 );
+}
+ElementLocation BTree::min_in_right_sibling( BlockLocation el ) {
+    ElementLocation answ = get_block_ptr( el )->parent;
+#ifndef RELEASE_VERSION
+    if( is_max_element( answ ) ) {
+        exit( 1 );
+    }
+#endif
+    ++answ.element;
+    answ.block = go_deeper( answ );
+    return ElementLocation( answ.block, 0 );
+}
+
+void BTree::take_and_move( ElementLocation take, ElementLocation replace ) {
+    move_element_without_links( take, replace );
+    shift_left_elements( take );
+}
+void BTree::BlockElement::delete_links( ElementInBlockLocation el ) { //links don't deleted
+    get_element_pointer( elements[ el ].prev_left_string )->next_right_string = elements[ el ].next_right_string;
+    get_element_pointer( elements[ el ].next_right_string )->prev_left_string = elements[ el ].prev_left_string;
 }
 void BTree::BlockElement::turn_block_empty() {
     used = 0;
