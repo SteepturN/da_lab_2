@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#define RELEASE_VERSION
+
 #include "b_tree.cpp"
 
 const char* return_message( ReturnMessage mssg ) {
@@ -66,14 +68,14 @@ int main() {
         std::cout << count_of_commands++ << '\t';
 #endif
         if( memory[ cur_pos ] == '+' ) { //add
-            std::cout << "//+\t";
+            std::cout << "+\t";
             // + aaa 123
 
             std::cout << return_message( b_tree.add( cur_pos += 2 ) ) << std::endl;
 
             while( memory[ ++cur_pos ] != '\n' );
         } else if( memory[ cur_pos ] == '-' ) { //remove
-            std::cout << "//-\t";
+            std::cout << "-\t";
 
             std::cout << return_message( b_tree.remove( cur_pos += 2 ) ) << std::endl;
 
@@ -81,16 +83,16 @@ int main() {
         } else if( memory[ cur_pos ] == '!' ) { //write to file
 
            if( memory[ cur_pos += 2 ] == 'S' ) { //! Save /asfd
-                std::cout << "//! Save\t";
+                std::cout << "! Save\t";
                 std::cout << return_message( b_tree.save_to_file( cur_pos += 5 ) ) << std::endl;
             } else {
-                std::cout << "//! Load\t"; //! Load /asdf
+                std::cout << "! Load\t"; //! Load /asdf
                 std::cout << return_message( b_tree.load_from_file( cur_pos += 5 ) ) << std::endl;
             }
 
             while( memory[ ++cur_pos ] != '\n' );
         } else { //find word
-            std::cout << "//find\t";
+            std::cout << "find\t";
             StringIntLocation data;
             ReturnMessage mssg = b_tree.find( cur_pos, data );
             std::cout << return_message( mssg ) << '\t';
