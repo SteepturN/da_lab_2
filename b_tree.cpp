@@ -9,7 +9,7 @@
 using BlockLocation = int;
 using ElementInBlockLocation = unsigned;
 using ElementsCount = unsigned;
-using StringIntLocation = int;
+using StringIntLocation = unsigned;
 //static const max_element_count = ( 2 * minimum_degree - 2 ) * max_blocks_count;
 
 static const ElementsCount minimum_degree = 2/* 1u << 15 */;
@@ -30,6 +30,7 @@ class BTree {
         ReturnMessage load_from_file( StringIntLocation );
         ReturnMessage find( StringIntLocation el, StringIntLocation& found_data );
         bool empty();
+        void print();
     private:
         struct ElementLocation {
             ElementLocation() = default;
@@ -258,9 +259,6 @@ void BTree::turn_last_free_block( BlockLocation block ) {
     if( is_last_free_block( first_free_block ) ) {
         free_blocks_over = true;
     }
-#ifdef RELEASE_VERSION
-    change here, so there could be used all blocks, including this last one
-#endif
     first_free_block = get_block_ptr( first_free_block )->block_pointers[ 0 ];
     get_block_ptr( prev_first_free )->turn_block_empty();
     if( rightmost < prev_first_free ) rightmost = prev_first_free;
@@ -885,4 +883,8 @@ void BTree::print_tree( BlockLocation block, int deep ) {
     else for( int i = 0; i <= block_ptr->used; ++i ) {
             print_tree( block_ptr->block_pointers[ i ], deep + 1 );
         }
+}
+void BTree::print() {
+    if( !empty() )
+        print_tree( first_block, 0 );
 }
