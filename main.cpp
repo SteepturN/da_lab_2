@@ -28,12 +28,13 @@ const char* return_message( ReturnMessage mssg ) {
         case ReturnMessage::ERROR:
             return error;
     }
+    return error;
 }
 
-void read_until( char* memory, unsigned& cur_pos, char sign ){
+void read_until_separator( char* memory, unsigned& cur_pos ){
     const int diffrence = 'a' - 'A';
-    while( ( memory[ cur_pos++ ] = std::getc( stdin ) ) != sign ) {
-        if( memory[ cur_pos - 1 ] < 'a' )
+    while( !is_separator( ( memory[ cur_pos++ ] = std::getc( stdin ) ) ) ) {
+        if( ( memory[ cur_pos - 1 ] >= 'A' ) && ( memory[ cur_pos - 1 ] <= 'Z' ) )
             memory[ cur_pos - 1 ] += diffrence;
     }
 }
@@ -42,12 +43,10 @@ int main() {
     int count_of_commands = 1;
 #endif
     const unsigned minimum_memory_size = sysconf( _SC_PAGE_SIZE );
-    const unsigned multiplier = 100;
+    const unsigned multiplier = 2 << 17;
     const unsigned memory_size = multiplier * minimum_memory_size;
-    const unsigned blocks_count = 2 << 10;
+    const unsigned blocks_count = 2 << 12;
 
-
-    unsigned strings_end = 0;
     char* memory =
         reinterpret_cast< char* > ( //used_memory_end
             mmap( NULL,
@@ -58,9 +57,9 @@ int main() {
 
     BTree b_tree( memory, memory_size, blocks_count );
 
-    char command, ch;
+    char command;
     for( unsigned cur_pos = 0, prev_pos = 0; cur_pos < memory_size; ) {
-        command = std::getc( stdin );
+        while( is_separator( command = std::getc( stdin ) ) );
         if( command == EOF ) break;
         else if( command == '/' ) {
             b_tree.print();
@@ -71,32 +70,33 @@ int main() {
             // std::cout << "+\t" << std::endl;
             std::getc( stdin );
             prev_pos = cur_pos;
-            read_until( memory, cur_pos, ' ' );
+            read_until_separator( memory, cur_pos );
             std::scanf( "%llu", reinterpret_cast< long long unsigned* >( memory + cur_pos ) );
             cur_pos += 8;
             std::printf( "%s\n", return_message( b_tree.add( prev_pos ) ) );
-            std::getc( stdin );
         } else if( command == '-' ) { //remove
             // std::cout << "-\t"<< std::endl;
             std::getc( stdin );
             prev_pos = cur_pos;
-            read_until( memory, cur_pos, '\n' );
+            read_until_separator( memory, cur_pos );
             cur_pos = prev_pos;
             std::printf( "%s\n", return_message( b_tree.remove( cur_pos ) ) );
         } else if( command == '!' ) { //write to file
             std::getc( stdin );
             if( std::getc( stdin ) == 'S' ) { //! Save /asfd
                 // std::cout << "! Save\t"<< std::endl;
-                std::scanf( "%*s" );
+                while( std::getc( stdin ) != ' ' );
                 prev_pos = cur_pos;
-                read_until( memory, cur_pos, '\n' );
+                while( !is_separator( memory[ cur_pos++ ] = std::getc( stdin ) ) );
+                memory[ cur_pos - 1 ] = '\0';
                 cur_pos = prev_pos;
                 std::printf( "%s\n", return_message( b_tree.save_to_file( cur_pos ) ) );
             } else { //! Load /asdf
                 // std::cout << "! Load\t"<< std::endl;
-                std::scanf( "%*s" );
+                while( std::getc( stdin ) != ' ' );
                 prev_pos = cur_pos;
-                read_until( memory, cur_pos, '\n' );
+                while( !is_separator( memory[ cur_pos++ ] = std::getc( stdin ) ) );
+                memory[ cur_pos - 1 ] = '\0';
                 cur_pos = prev_pos;
                 std::printf( "%s\n", return_message( b_tree.load_from_file( cur_pos ) ) );
             }
@@ -106,7 +106,7 @@ int main() {
             prev_pos = cur_pos;
             std::ungetc( command, stdin );
             // memory[ cur_pos++ ] = command;
-            read_until( memory, cur_pos, '\n' );
+            read_until_separator( memory, cur_pos );
             cur_pos = prev_pos;
             ReturnMessage mssg = b_tree.find( cur_pos, data );
             std::printf( "%s", return_message( mssg ) );

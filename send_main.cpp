@@ -5,14 +5,14 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <sys/mman.h>
+// #include <sys/mman.h>
 using BlockLocation = int;
 using ElementInBlockLocation = unsigned;
 using ElementsCount = unsigned;
 using StringIntLocation = unsigned;
 //static const max_element_count = ( 2 * minimum_degree - 2 ) * max_blocks_count;
 
-static const ElementsCount minimum_degree = 1u << 6;
+static const ElementsCount minimum_degree = 2/* 1u << 15 */;
 
 enum class ReturnMessage : char {
     Ok,
@@ -277,12 +277,14 @@ BTree::BTree( char* strings_memory, int strings_size, int blocks_count )
     : max_blocks_count( blocks_count ),
       strings_memory( strings_memory ), memory_length( sizeof( BTree::BlockElement ) * max_blocks_count ),
       strings_memory_size( strings_size ),
-      memory( mmap( NULL, memory_length, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_ANONYMOUS /* | MAP_UNINITIALIZED */, 0, 0 ) ),
+      memory( malloc( memory_length ) ),
+      // memory( mmap( NULL, memory_length, PROT_READ | PROT_WRITE,
+      //               MAP_PRIVATE | MAP_ANONYMOUS /* | MAP_UNINITIALIZED */, 0, 0 ) ),
       first_free_block( 0 ), first_block( 0 ), rightmost( 0 ),
       first_string( 0, 0 ), last_string( 0, 0 ) {
-    if( memory == MAP_FAILED ) exit( 1 );
-    if( max_blocks_count == 0 ) exit( 2 );
+    // if( memory == MAP_FAILED ) exit( 2 );
+    if( memory == nullptr ) exit( 2 );
+    if( max_blocks_count == 0 ) exit( 3 );
     for( BlockLocation i = first_free_block; i < max_blocks_count - 1; ++i ) {
         make_free_blocks_chain( i, i + 1 );
     }
@@ -497,43 +499,40 @@ void BTree::relocate_strings( StringIntLocation& cur_loc ) {
     }
     cur_loc = cur_location;
 }
-#include <fstream>
 ReturnMessage BTree::save_to_file( StringIntLocation& cur_loc ) {
     StringIntLocation prev_cur_loc = cur_loc;
     relocate_strings( cur_loc );
-    // int fd = open( strings_memory + prev_cur_loc, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU );
-    // if( fd == -1 ) return ReturnMessage::ERROR;
-    using os = std::ios;
-    std::ofstream file( strings_memory + prev_cur_loc, os::out | os::binary | os::trunc );
-    if( !file.write( reinterpret_cast< char* >( &cur_loc ), sizeof( cur_loc ) ) ) {
+    int fd = open( strings_memory + prev_cur_loc, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU );
+    if( fd == -1 ) return ReturnMessage::ERROR;
+
+    if( write( fd, &cur_loc, sizeof( cur_loc ) ) != sizeof( cur_loc ) ) {
         std::cerr << "505\n";
     }
     if( cur_loc != 0 ) {
-        if( !file.write( strings_memory, cur_loc ) )
+        if( write( fd, strings_memory, cur_loc ) != cur_loc )
             std::cerr << "508\n";
-        if( !file.write( reinterpret_cast< char* >( this ), sizeof( *this ) ) )
+        if( write( fd, this, sizeof( *this ) ) != sizeof( *this ) )
             std::cerr << "510\n";
-        if( !file.write( reinterpret_cast< char* >( memory ), ( rightmost + 1 ) * sizeof( BlockElement ) ) )
+        if( write( fd, memory, ( rightmost + 1 ) * sizeof( BlockElement ) ) !=
+            ( rightmost + 1 ) * sizeof( BlockElement ) )
             std::cerr << "512\n";
     }
-    file.close();
+    close( fd );
     return ReturnMessage::Ok;
 }
 ReturnMessage BTree::load_from_file( StringIntLocation& cur_loc ) {
-    // int fd = open( strings_memory + cur_loc, O_RDONLY );
-    // if( fd == -1 ) return ReturnMessage::ERROR;
-    using os = std::ios;
-    std::ifstream file( strings_memory + cur_loc, os::in | os::binary );
+    int fd = open( strings_memory + cur_loc, O_RDONLY );
+    if( fd == -1 ) return ReturnMessage::ERROR;
     char* cur_strings_memory = strings_memory;
     void* cur_memory = memory;
 
-    file.read( reinterpret_cast< char* >( &cur_loc ), sizeof( cur_loc ) );
+    read( fd, &cur_loc, sizeof( cur_loc ) );
     if( cur_loc != 0 ) {
-        file.read( strings_memory, cur_loc );
-        file.read( reinterpret_cast< char* >( this ), sizeof( *this ) );
+        read( fd, strings_memory, cur_loc );
+        read( fd, this, sizeof( *this ) );
         memory = cur_memory;
         strings_memory = cur_strings_memory;
-        file.read( reinterpret_cast< char* >( memory ), ( rightmost + 1 ) * sizeof( BlockElement ) );
+        read( fd, memory, ( rightmost + 1 ) * sizeof( BlockElement ) );
         for( BlockLocation i = rightmost + 1; i < max_blocks_count; ++i ) {
             make_free_blocks_chain( i, i + 1 );
         }
@@ -541,7 +540,7 @@ ReturnMessage BTree::load_from_file( StringIntLocation& cur_loc ) {
     } else {
         make_btree_free();
     }
-    file.close();
+    close( fd );
     return ReturnMessage::Ok;
 }
 
@@ -813,7 +812,7 @@ BTree::ElementLocation BTree::left_parent( BlockLocation el ) {
     ElementLocation answ = get_block_ptr( el )->parent;
 #ifndef RELEASE_VERSION
     if( is_min_element( answ ) ) {
-        exit( 1 );
+        exit( 4 );
     }
 #endif
     --answ.element;
@@ -823,7 +822,7 @@ BTree::ElementLocation BTree::max_in_left_sibling( BlockLocation el ) {
     ElementLocation answ = get_block_ptr( el )->parent;
 #ifndef RELEASE_VERSION
     if( is_min_element( answ ) ) {
-        exit( 1 );
+        exit( 5 );
     }
 #endif
     --answ.element;
@@ -834,7 +833,7 @@ BTree::ElementLocation BTree::min_in_right_sibling( BlockLocation el ) {
     ElementLocation answ = get_block_ptr( el )->parent;
 #ifndef RELEASE_VERSION
     if( is_max_child( answ ) ) {
-        exit( 1 );
+        exit( 6 );
     }
 #endif
     ++answ.element;
@@ -899,4 +898,126 @@ void BTree::print_tree( BlockLocation block, int deep ) {
 void BTree::print() {
     if( !empty() )
         print_tree( first_block, 0 );
+}
+#include <iostream>
+#include <inttypes.h>
+#include <unistd.h>
+#include <malloc.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+// #include <sys/mman.h>
+#include <cstdio>
+#include <cstdlib>
+
+#define RELEASE_VERSION
+
+// #include "b_tree.cpp"
+
+const char* return_message( ReturnMessage mssg ) {
+    static const char ok[] = "OK";
+    static const char no_such_word[] = "NoSuchWord";
+    static const char exist[] = "Exist";
+    static const char error[] = "ERROR";
+    switch( mssg ) {
+        case ReturnMessage::Ok:
+            return ok;
+        case ReturnMessage::NoSuchWord:
+            return no_such_word;
+        case ReturnMessage::Exist:
+            return exist;
+        case ReturnMessage::ERROR:
+            return error;
+    }
+    return error;
+}
+
+void read_until_separator( char* memory, unsigned& cur_pos ){
+    const int diffrence = 'a' - 'A';
+    while( !is_separator( ( memory[ cur_pos++ ] = std::getc( stdin ) ) ) ) {
+        if( ( memory[ cur_pos - 1 ] >= 'A' ) && ( memory[ cur_pos - 1 ] <= 'Z' ) )
+            memory[ cur_pos - 1 ] += diffrence;
+    }
+}
+int main() {
+#ifndef RELEASE_VERSION
+    int count_of_commands = 1;
+#endif
+    const unsigned minimum_memory_size = 1024 /* sysconf( _SC_PAGE_SIZE ) */;
+    const unsigned multiplier = 2 << 13;
+    const unsigned memory_size = multiplier * minimum_memory_size;
+    const unsigned blocks_count = 2 << 15;
+
+    char* memory =
+        reinterpret_cast< char* > ( //used_memory_end
+            malloc( memory_size )
+            // mmap( NULL,
+            //       memory_size,
+            //       PROT_READ | PROT_WRITE,
+            //       MAP_PRIVATE | MAP_ANONYMOUS, 0, 0 )
+        );
+
+    BTree b_tree( memory, memory_size, blocks_count );
+
+    char command;
+    for( unsigned cur_pos = 0, prev_pos = 0; cur_pos < memory_size; ) {
+        while( is_separator( command = std::getc( stdin ) ) );
+        if( command == EOF ) break;
+        else if( command == '/' ) {
+            b_tree.print();
+            std::getc( stdin );
+            // std::cout << std::getc( stdin ) << std::endl;
+        } else if( command == '+' ) { //add
+            // + aaa 123
+            // std::cout << "+\t" << std::endl;
+            std::getc( stdin );
+            prev_pos = cur_pos;
+            read_until_separator( memory, cur_pos );
+            std::scanf( "%llu", reinterpret_cast< long long unsigned* >( memory + cur_pos ) );
+            cur_pos += 8;
+            std::printf( "%s\n", return_message( b_tree.add( prev_pos ) ) );
+        } else if( command == '-' ) { //remove
+            // std::cout << "-\t"<< std::endl;
+            std::getc( stdin );
+            prev_pos = cur_pos;
+            read_until_separator( memory, cur_pos );
+            cur_pos = prev_pos;
+            std::printf( "%s\n", return_message( b_tree.remove( cur_pos ) ) );
+        } else if( command == '!' ) { //write to file
+            std::getc( stdin );
+            if( std::getc( stdin ) == 'S' ) { //! Save /asfd
+                // std::cout << "! Save\t"<< std::endl;
+                while( std::getc( stdin ) != ' ' );
+                prev_pos = cur_pos;
+                while( !is_separator( memory[ cur_pos++ ] = std::getc( stdin ) ) );
+                memory[ cur_pos - 1 ] = '\0';
+                cur_pos = prev_pos;
+                std::printf( "%s\n", return_message( b_tree.save_to_file( cur_pos ) ) );
+            } else { //! Load /asdf
+                // std::cout << "! Load\t"<< std::endl;
+                while( std::getc( stdin ) != ' ' );
+                prev_pos = cur_pos;
+                while( !is_separator( memory[ cur_pos++ ] = std::getc( stdin ) ) );
+                memory[ cur_pos - 1 ] = '\0';
+                cur_pos = prev_pos;
+                std::printf( "%s\n", return_message( b_tree.load_from_file( cur_pos ) ) );
+            }
+        } else { //find word
+            // std::cout << "find\t"<< std::endl;
+            StringIntLocation data;
+            prev_pos = cur_pos;
+            std::ungetc( command, stdin );
+            // memory[ cur_pos++ ] = command;
+            read_until_separator( memory, cur_pos );
+            cur_pos = prev_pos;
+            ReturnMessage mssg = b_tree.find( cur_pos, data );
+            std::printf( "%s", return_message( mssg ) );
+            if( mssg == ReturnMessage::Ok )
+                std::printf( ": %llu", *reinterpret_cast< long long unsigned* >( memory + data ) );
+            std::printf( "\n" );
+        }
+    }
+    // b_tree.replace_strings(  );
+    // close( fd );
+    return 0;
 }
