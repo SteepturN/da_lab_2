@@ -529,12 +529,7 @@ ReturnMessage BTree::load_from_file( StringIntLocation& cur_loc ) {
     char* cur_strings_memory = strings_memory;
     void* cur_memory = memory;
 
-
     file.read( reinterpret_cast< char* >( &cur_loc ), sizeof( cur_loc ) );
-    if( !file ) {
-        make_btree_free();
-        cur_loc = 0;
-    } else
     if( cur_loc != 0 ) {
         file.read( strings_memory, cur_loc );
         file.read( reinterpret_cast< char* >( this ), sizeof( *this ) );
@@ -545,6 +540,8 @@ ReturnMessage BTree::load_from_file( StringIntLocation& cur_loc ) {
             make_free_blocks_chain( i, i + 1 );
         }
         turn_last_free_block( max_blocks_count - 1 );
+    } else {
+        make_btree_free();
     }
     file.close();
     return ReturnMessage::Ok;
@@ -942,7 +939,7 @@ int main() {
     const unsigned minimum_memory_size = sysconf( _SC_PAGE_SIZE );
     const unsigned multiplier = 2 << 17;
     const unsigned memory_size = multiplier * minimum_memory_size;
-    const unsigned blocks_count = 2 << 15;
+    const unsigned blocks_count = 2 << 12;
 
     char* memory =
         reinterpret_cast< char* > ( //used_memory_end
